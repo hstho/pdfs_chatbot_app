@@ -10,6 +10,7 @@ from langchain.chains import ConversationalRetrievalChain
 from htmlTemplates import css, bot_template, user_template
 from langchain.llms import HuggingFaceHub
 
+
 def get_pdf_text(pdf_docs):
     text = ""
     for pdf in pdf_docs:
@@ -41,19 +42,20 @@ def get_conversation_chain(vectorstore):
     llm = ChatOpenAI()
     # llm = HuggingFaceHub(repo_id="google/flan-t5-xxl", model_kwargs={"temperature":0.5, "max_length":512})
 
-    memory = ConversationBufferMemory(
-        memory_key='chat_history', return_messages=True)
+    memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
     conversation_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=vectorstore.as_retriever(),
-        memory=memory
-    )
+        memory=memory,
+        return_source_documents=True)
     return conversation_chain
 
 
-def handle_userinput(user_question):
-    response = st.session_state.conversation({'question': user_question})
+def handle_userinput(user_question, conversation_chain):
+    response = conversation_chain({'question': user_question})
     st.session_state.chat_history = response['chat_history']
+    # get source text chunks
+    st.session_state.source_text_chunks = response.get("source_documents", [])
 
     for i, message in enumerate(st.session_state.chat_history):
         if i % 2 == 0:
@@ -62,7 +64,11 @@ def handle_userinput(user_question):
         else:
             st.write(bot_template.replace(
                 "{{MSG}}", message.content), unsafe_allow_html=True)
-
+            # Display source text chunk after bot response
+            if i // 2 < len(st.session_state.source_text_chunks):
+                for chunk in st.session_state.source_text_chunks:
+                    st.write(f"Source text: {chunk}")
+                
 
 def main():
     load_dotenv()
@@ -75,10 +81,22 @@ def main():
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = None
 
+    if "source_text_chunks" not in st.session_state:
+        st.session_state.source_text_chunks = None
+
+    if "displayed_source_chunks" not in st.session_state:
+        st.session_state.displayed_source_chunks = set()
+
     st.header("Chat with multiple PDFs :books:")
+
+    # Add a button to reset chat history
+    if st.button("Reset Chat History"):
+        st.session_state.chat_history = None
+        st.session_state.source_text_chunks = None
+
     user_question = st.text_input("Ask a question about your documents:")
     if user_question:
-        handle_userinput(user_question)
+        handle_userinput(user_question, st.session_state.conversation)
 
     with st.sidebar:
         st.subheader("Your documents")
